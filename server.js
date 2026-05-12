@@ -22,22 +22,24 @@ const server = http.createServer(app);
 // ── Allowed origins ───────────────────────────────────────────────
 const allowedOrigins = [
   process.env.CLIENT_URL,
+  "https://chat-app-frontend-kappa-rosy.vercel.app",
+  "https://chat-app-frontend-at3vmvn3h-poonam-gambhire-s-projects.vercel.app",
   "http://localhost:3000",
   "http://localhost:5173",
   "http://localhost:5174",
-  "http://localhost:8081",   // React Native / Expo web
-  "http://localhost:8082",   // Expo fallback port
-  "http://localhost:19000",  // Expo Go
-  "http://localhost:19006",  // Expo web
-  /^http:\/\/192\.168\.\d+\.\d+(:\d+)?$/,   // LAN / mobile device
-  /^http:\/\/10\.0\.\d+\.\d+(:\d+)?$/,      // Android emulator
-  /^http:\/\/172\.(1[6-9]|2\d|3[01])\.\d+\.\d+(:\d+)?$/,  // Docker bridge
+  "http://localhost:8081",
+  "http://localhost:8082",
+  "http://localhost:19000",
+  "http://localhost:19006",
+  /^http:\/\/192\.168\.\d+\.\d+(:\d+)?$/,
+  /^http:\/\/10\.0\.\d+\.\d+(:\d+)?$/,
+  /^http:\/\/172\.(1[6-9]|2\d|3[01])\.\d+\.\d+(:\d+)?$/,
 ].filter(Boolean);
 
 console.log("✅ CLIENT_URL from .env:", process.env.CLIENT_URL);
 
 const isOriginAllowed = (origin) => {
-  if (!origin) return true; // mobile apps / curl — no Origin header
+  if (!origin) return true;
   return allowedOrigins.some((o) =>
     typeof o === "string" ? o === origin : o.test(origin)
   );
@@ -107,7 +109,6 @@ io.on("connection", (socket) => {
     console.log("👤 User online:", userId);
   });
 
-  // ── Direct chat typing ──────────────────────────────────────────
   socket.on("typing", ({ senderId, receiverId }) => {
     const receiverSocketId = onlineUsers[receiverId];
     if (receiverSocketId) {
@@ -122,7 +123,6 @@ io.on("connection", (socket) => {
     }
   });
 
-  // ── Group typing ──────────────────────────────────────────────────
   socket.on("groupTyping", ({ senderId, senderName, groupId, memberIds }) => {
     if (!Array.isArray(memberIds)) return;
     memberIds.forEach((memberId) => {
