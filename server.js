@@ -19,6 +19,9 @@ connectDB();
 const app = express();
 const server = http.createServer(app);
 
+// ✅ ADDED: trust proxy for Render
+app.set("trust proxy", 1);
+
 // ── Allowed origins ───────────────────────────────────────────────
 const allowedOrigins = [
   process.env.CLIENT_URL,
