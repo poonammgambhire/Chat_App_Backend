@@ -7,6 +7,10 @@ import { Server } from "socket.io";
 
 dotenv.config();
 
+// ✅ Debug: env vars check
+console.log("EMAIL_USER:", process.env.EMAIL_USER);
+console.log("EMAIL_PASS:", process.env.EMAIL_PASS ? "SET" : "NOT SET");
+
 import connectDB from "./config/db.js";
 import authRoutes from "./routes/auth.js";
 import messageRoutes from "./routes/message.js";
@@ -19,10 +23,8 @@ connectDB();
 const app = express();
 const server = http.createServer(app);
 
-// ✅ ADDED: trust proxy for Render
 app.set("trust proxy", 1);
 
-// ── Allowed origins ───────────────────────────────────────────────
 const allowedOrigins = [
   process.env.CLIENT_URL,
   "https://chat-app-frontend-kappa-rosy.vercel.app",
@@ -62,12 +64,10 @@ const corsOptions = {
   allowedHeaders: ["Content-Type", "Authorization"],
 };
 
-// ── Middleware ────────────────────────────────────────────────────
 app.use(cors(corsOptions));
 app.use(express.json({ limit: "10mb" }));
 app.use(cookieParser());
 
-// ── Routes ────────────────────────────────────────────────────────
 app.use("/api/auth", authRoutes);
 app.use("/api/messages", messageRoutes);
 app.use("/api/friends", friendRoutes);
@@ -76,7 +76,6 @@ app.use("/api/notifications", notificationRoutes);
 
 app.get("/", (req, res) => res.send("🚀 Server is running..."));
 
-// ── Global error handler ──────────────────────────────────────────
 app.use((err, req, res, next) => {
   console.error("🔥 Error:", err.message || err.stack);
   if (err.message?.startsWith("CORS policy")) {
@@ -85,7 +84,6 @@ app.use((err, req, res, next) => {
   res.status(500).json({ message: "Something went wrong!" });
 });
 
-// ── Socket.IO ─────────────────────────────────────────────────────
 const io = new Server(server, {
   cors: {
     origin: (origin, callback) => {
