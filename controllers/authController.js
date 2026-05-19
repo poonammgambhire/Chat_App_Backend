@@ -7,7 +7,6 @@ import cloudinary from "../config/cloudinary.js";
 import sendEmail from "../emails/sendEmail.js";
 import { passwordResetOtpTemplate, welcomeEmailTemplate } from "../emails/emailTemplate.js";
 
-// ── Helper: user stats काढतो (friends, groups, messages) ──────────────────────
 const getUserStats = async (userId) => {
   const [user, groupsCount, messagesSent] = await Promise.all([
     User.findById(userId).select("friends createdAt"),
@@ -21,8 +20,7 @@ const getUserStats = async (userId) => {
   };
 };
 
-// ── OTP Store (in-memory, 15 min expiry) ──────────────────────────────────────
-const otpStore = {}
+// ✅ REMOVED: const otpStore = {}  — replaced with DB fields
 
 // ================= SIGNUP =================
 export const signup = async (req, res) => {
@@ -184,7 +182,8 @@ export const updateProfile = async (req, res) => {
   }
 };
 
-// ================= FORGOT PASSWORD — OTP पाठव ===============================
+// ================= FORGOT PASSWORD =================
+// ✅ CHANGED: otpStore → DB (user.otpCode, user.otpExpiresAt)
 export const forgotPassword = async (req, res) => {
   try {
     const { email } = req.body;
@@ -193,20 +192,16 @@ export const forgotPassword = async (req, res) => {
     const user = await User.findOne({ email: email.toLowerCase().trim() });
     if (!user) return res.status(404).json({ message: "No account found with this email" });
 
-    // 6-digit OTP generate करा
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
 
-    // ✅ FIX: Resend केल्यावर verified/resetToken preserve कर
-    const existing = otpStore[email.toLowerCase()] || {};
-    otpStore[email.toLowerCase()] = {
-      otp,
-      expiresAt: Date.now() + 15 * 60 * 1000,
-      verified: existing.verified || false,
-      resetToken: existing.resetToken || null,
-      tokenExpiresAt: existing.tokenExpiresAt || null,
-    };
+    // ✅ Save OTP to DB instead of otpStore
+    user.otpCode = otp;
+    user.otpExpiresAt = new Date(Date.now() + 15 * 60 * 1000);
+    user.otpVerified = false;
+    user.resetToken = null;
+    user.resetTokenExpiresAt = null;
+    await user.save();
 
-    // Email पाठवा
     await sendEmail({
       to: user.email,
       subject: "ChatApp — Password Reset OTP",
@@ -216,41 +211,34 @@ export const forgotPassword = async (req, res) => {
     res.status(200).json({ message: "OTP sent to your email" });
   } catch (error) {
     console.error("forgotPassword error:", error.message);
-    const isEmailError = error.message?.includes("auth") || error.message?.includes("535") || error.message?.includes("Username and Password");
-    res.status(500).json({
-      message: isEmailError
-        ? "Email service error. Please check server email configuration."
-        : "Failed to send OTP. Please try again.",
-    });
+    res.status(500).json({ message: "Failed to send OTP. Please try again." });
   }
 };
 
-// ================= VERIFY OTP ================================================
+// ================= VERIFY OTP =================
+// ✅ CHANGED: otpStore → DB lookup
 export const verifyOtp = async (req, res) => {
   try {
     const { email, otp } = req.body;
     if (!email || !otp)
       return res.status(400).json({ message: "Email and OTP required" });
 
-    const key = email.toLowerCase().trim();
-    const record = otpStore[key];
-
-    if (!record)
+    const user = await User.findOne({ email: email.toLowerCase().trim() });
+    if (!user || !user.otpCode)
       return res.status(400).json({ message: "OTP not found. Please request again." });
 
-    if (Date.now() > record.expiresAt) {
-      delete otpStore[key];
+    if (Date.now() > user.otpExpiresAt)
       return res.status(400).json({ message: "OTP expired. Please request a new one." });
-    }
 
-    if (record.otp !== otp.toString().trim())
+    if (user.otpCode !== otp.toString().trim())
       return res.status(400).json({ message: "Invalid OTP. Please try again." });
 
-    // OTP valid — reset token द्या
+    // ✅ Save verified state + resetToken to DB
     const resetToken = crypto.randomBytes(32).toString("hex");
-    otpStore[key].verified = true;
-    otpStore[key].resetToken = resetToken;
-    otpStore[key].tokenExpiresAt = Date.now() + 10 * 60 * 1000;
+    user.otpVerified = true;
+    user.resetToken = resetToken;
+    user.resetTokenExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
+    await user.save();
 
     res.status(200).json({ message: "OTP verified", resetToken });
   } catch (error) {
@@ -259,7 +247,8 @@ export const verifyOtp = async (req, res) => {
   }
 };
 
-// ================= RESET PASSWORD ============================================
+// ================= RESET PASSWORD =================
+// ✅ CHANGED: otpStore → DB lookup + cleanup
 export const resetPassword = async (req, res) => {
   try {
     const { email, resetToken, newPassword } = req.body;
@@ -270,29 +259,24 @@ export const resetPassword = async (req, res) => {
     if (newPassword.length < 6)
       return res.status(400).json({ message: "Password must be at least 6 characters" });
 
-    const key = email.toLowerCase().trim();
-    const record = otpStore[key];
-
-    if (!record || !record.verified)
+    const user = await User.findOne({ email: email.toLowerCase().trim() });
+    if (!user || !user.otpVerified)
       return res.status(400).json({ message: "Please verify OTP first" });
 
-    if (record.resetToken !== resetToken)
+    if (user.resetToken !== resetToken)
       return res.status(400).json({ message: "Invalid reset token" });
 
-    if (Date.now() > record.tokenExpiresAt)
+    if (Date.now() > user.resetTokenExpiresAt)
       return res.status(400).json({ message: "Reset token expired. Please start again." });
 
-    const user = await User.findOne({ email: key });
-    if (!user) return res.status(404).json({ message: "User not found" });
-
-    // Password update करा (pre-save hook hash करेल)
+    // ✅ Update password + clear OTP fields
     user.password = newPassword;
-    user.resetPasswordToken = undefined;
-    user.resetPasswordExpire = undefined;
+    user.otpCode = undefined;
+    user.otpExpiresAt = undefined;
+    user.otpVerified = false;
+    user.resetToken = undefined;
+    user.resetTokenExpiresAt = undefined;
     await user.save();
-
-    // Cleanup OTP store
-    delete otpStore[key];
 
     res.status(200).json({ message: "Password reset successful! Please login." });
   } catch (error) {
@@ -300,6 +284,3 @@ export const resetPassword = async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 };
-
-
-
